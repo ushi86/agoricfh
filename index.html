@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NFT Shop</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&family=Montserrat:wght@700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <h1 class="fancy-heading">BLOCKPOINTS</h1>
+        <div class="auth-box">
+            <h2>Authentication</h2>
+            <input type="text" id="username" placeholder="Username">
+            <input type="password" id="password" placeholder="Password">
+            <button id="login">Login</button>
+        </div>
+        <div id="products"></div>
+        <div class="button-container">
+            <button id="connectWallet">Connect Wallet</button>
+            <button id="viewNFTs">View My NFTs</button>
+            <button id="collectNFT">Collect NFT</button>
+            <button id="connectAgoric">Connect with Agoric</button>
+        </div>
+        <div id="message"></div>
+    </div>
+    <footer>
+        <p>In collaboration with <strong class="agoric">Rise In & Agoric</strong></p>
+    </footer>
+    <script src="https://cdn.jsdelivr.net/npm/web3/dist/web3.min.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
