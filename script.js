@@ -48,7 +48,7 @@ async function purchaseNFT(productId) {
     try {
         const txHash = await web3.eth.sendTransaction(transactionParameters);
         document.getElementById('message').innerText = `Transaction successful: ${txHash.transactionHash}`;
-        userNFTs.push(product); // Add NFT to user's collection
+        userNFTs.push(product); 
     } catch (error) {
         console.error(error);
         document.getElementById('message').innerText = `Transaction failed: ${error.message}`;
