@@ -1,4 +1,4 @@
-   **BLOCKPOINTS**  
+   **BLOCKPOINTS**  [the website is being revamped and will be up soon:) ]
 
  **Overview**  
 BLOCKPOINTS is a blockchain-powered platform rewarding shoppers with **Non-Fungible Tokens (NFTs)** for their purchases. Built on the **Agoric platform**, it offers smart contract integration and cross-chain interoperability to enhance user engagement and flexibility.  
