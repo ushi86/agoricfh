@@ -3,295 +3,363 @@ import { Far } from '@endo/far';
 import { E } from '@endo/eventual-send';
 import { makeZoeKit } from '@agoric/zoe';
 import { makeNotifierKit } from '@agoric/notifier';
+import { makeIssuerKit, AmountMath, AssetKind } from '@agoric/ertp';
+import { makeContract } from '@agoric/contract-support';
 
 const { zoeService } = makeZoeKit();
+const { details: X } = assert;
 
-export const start = async (zcf) => {
-  // Create mints for NFTs and collateral tokens
-  const { mint: nftMint, issuer: nftIssuer, brand: nftBrand } = makeMint('BLOCKPOINTS_NFT');
-  const { mint: collateralMint, issuer: collateralIssuer, brand: collateralBrand } = makeMint('BLOCKPOINTS_COLLATERAL');
-  const { mint: rewardMint, issuer: rewardIssuer, brand: rewardBrand } = makeMint('BLOCKPOINTS_REWARDS');
+// NFT Metadata structure
+const createNFTMetadata = (name, description, image, attributes, tier) => {
+  return {
+    name,
+    description,
+    image,
+    attributes: attributes || {},
+    tier,
+    mintDate: new Date().toISOString(),
+    contractVersion: '2.0.0'
+  };
+};
 
-  // Storage for user data
-  const userNFTs = new Map();
-  const userCollateral = new Map();
-  const userRewards = new Map();
-  const userProfiles = new Map();
-  const nftMetadata = new Map();
+// Tier definitions with requirements
+const TIER_DEFINITIONS = {
+  BRONZE: { minSpent: 0, rewardMultiplier: 1.0, maxNFTs: 5 },
+  SILVER: { minSpent: 1000, rewardMultiplier: 1.2, maxNFTs: 10 },
+  GOLD: { minSpent: 5000, rewardMultiplier: 1.5, maxNFTs: 20 },
+  PLATINUM: { minSpent: 10000, rewardMultiplier: 2.0, maxNFTs: 50 },
+  DIAMOND: { minSpent: 25000, rewardMultiplier: 3.0, maxNFTs: 100 }
+};
 
-  // Notifier for real-time updates
-  const { notifier: updatesNotifier, updater: updatesUpdater } = makeNotifierKit();
+// Contract behavior
+const makeBlockpointsNFTContract = (zoe, privateArgs) => {
+  const {
+    nftIssuerKit,
+    rewardIssuerKit,
+    adminWallet,
+    feeCollector
+  } = privateArgs;
 
-  // Helper function to create user profile
-  const createUserProfile = (userId, userData = {}) => {
-    const profile = {
-      userId,
-      joinDate: new Date().toISOString(),
-      totalSpent: 0,
-      totalRewards: 0,
-      nftCount: 0,
-      tier: 'BRONZE',
-      ...userData
-    };
-    userProfiles.set(userId, profile);
-    return profile;
+  // State management
+  const state = {
+    nftCounter: 0,
+    userNFTs: new Map(), // userId -> NFT[]
+    userTiers: new Map(), // userId -> tier
+    userSpending: new Map(), // userId -> totalSpent
+    tierNFTs: new Map(), // tier -> NFT[]
+    mintingFees: AmountMath.make(nftIssuerKit.brand, 0n),
+    totalMinted: 0,
+    paused: false,
+    adminAddresses: [adminWallet],
+    feeRate: 0.05 // 5% fee
   };
 
-  // Mint NFT for user
-  const mintNFT = (userId, metadata) => {
-    const nftId = `nft_${userId}_${Date.now()}`;
-    const nft = nftMint.mintPayment({ 
-      userId, 
-      nftId,
-      metadata: {
-        name: metadata.name || 'BLOCKPOINTS NFT',
-        description: metadata.description || 'Earned through shopping',
-        image: metadata.image || '',
-        attributes: metadata.attributes || {},
-        tier: metadata.tier || 'BRONZE',
-        mintDate: new Date().toISOString(),
-        ...metadata
+  // Helper functions
+  const getUserTier = (userId) => {
+    const totalSpent = state.userSpending.get(userId) || 0;
+    let currentTier = 'BRONZE';
+    
+    for (const [tier, definition] of Object.entries(TIER_DEFINITIONS)) {
+      if (totalSpent >= definition.minSpent) {
+        currentTier = tier;
+      } else {
+        break;
       }
-    });
-
-    if (!userNFTs.has(userId)) {
-      userNFTs.set(userId, []);
     }
-    userNFTs.get(userId).push({ nftId, nft, metadata: nft.value[0].metadata });
-    nftMetadata.set(nftId, nft.value[0].metadata);
+    
+    return currentTier;
+  };
 
-    // Update user profile
-    const profile = userProfiles.get(userId) || createUserProfile(userId);
-    profile.nftCount += 1;
-    userProfiles.set(userId, profile);
+  const canMintNFT = (userId, tier) => {
+    const userNFTs = state.userNFTs.get(userId) || [];
+    const tierDefinition = TIER_DEFINITIONS[tier];
+    return userNFTs.length < tierDefinition.maxNFTs;
+  };
 
-    // Notify updates
-    updatesUpdater.updateState({
-      type: 'NFT_MINTED',
-      userId,
+  const calculateReward = (spendingAmount, tier) => {
+    const tierDefinition = TIER_DEFINITIONS[tier];
+    return Math.floor(spendingAmount * tierDefinition.rewardMultiplier);
+  };
+
+  // Main contract methods
+  const mintNFT = async (userId, metadata, shoppingData = {}) => {
+    assert(!state.paused, 'Contract is paused');
+    assert(userId, 'User ID is required');
+    assert(metadata.name, 'NFT name is required');
+
+    const userTier = getUserTier(userId);
+    assert(canMintNFT(userId, userTier), `Cannot mint more NFTs for ${userTier} tier`);
+
+    // Create NFT
+    const nftId = `nft_${state.nftCounter++}`;
+    const nftMetadata = createNFTMetadata(
+      metadata.name,
+      metadata.description,
+      metadata.image,
+      metadata.attributes,
+      userTier
+    );
+
+    // Mint NFT
+    const nftAmount = AmountMath.make(nftIssuerKit.brand, 1n);
+    const nftPayment = await nftIssuerKit.mint.mintPayment(nftAmount);
+    
+    const nft = {
       nftId,
-      metadata: nft.value[0].metadata
-    });
+      metadata: nftMetadata,
+      userId,
+      tier: userTier,
+      mintDate: new Date().toISOString(),
+      shoppingData
+    };
 
-    return { nftId, nft, metadata: nft.value[0].metadata };
-  };
-
-  // Lock collateral for premium features
-  const lockCollateral = (userId, amount) => {
-    const collateralId = `collateral_${userId}_${Date.now()}`;
-    const collateral = collateralMint.mintPayment({ 
-      userId, 
-      collateralId,
-      amount,
-      lockDate: new Date().toISOString()
-    });
-
-    if (!userCollateral.has(userId)) {
-      userCollateral.set(userId, []);
+    // Update state
+    if (!state.userNFTs.has(userId)) {
+      state.userNFTs.set(userId, []);
     }
-    userCollateral.get(userId).push({ collateralId, collateral, amount });
-
-    updatesUpdater.updateState({
-      type: 'COLLATERAL_LOCKED',
-      userId,
-      collateralId,
-      amount
-    });
-
-    return { collateralId, collateral, amount };
-  };
-
-  // Unlock collateral
-  const unlockCollateral = (userId, collateralId) => {
-    const userCollaterals = userCollateral.get(userId) || [];
-    const collateralIndex = userCollaterals.findIndex(c => c.collateralId === collateralId);
+    state.userNFTs.get(userId).push(nft);
     
-    if (collateralIndex === -1) {
-      throw new Error('Collateral not found');
+    if (!state.tierNFTs.has(userTier)) {
+      state.tierNFTs.set(userTier, []);
     }
-
-    const collateral = userCollaterals[collateralIndex];
-    userCollaterals.splice(collateralIndex, 1);
-    userCollateral.set(userId, userCollaterals);
-
-    updatesUpdater.updateState({
-      type: 'COLLATERAL_UNLOCKED',
-      userId,
-      collateralId
-    });
-
-    return collateral;
-  };
-
-  // Award rewards for shopping
-  const awardRewards = (userId, amount, reason = 'shopping') => {
-    const rewardId = `reward_${userId}_${Date.now()}`;
-    const reward = rewardMint.mintPayment({ 
-      userId, 
-      rewardId,
-      amount,
-      reason,
-      awardDate: new Date().toISOString()
-    });
-
-    if (!userRewards.has(userId)) {
-      userRewards.set(userId, []);
-    }
-    userRewards.get(userId).push({ rewardId, reward, amount, reason });
-
-    // Update user profile
-    const profile = userProfiles.get(userId) || createUserProfile(userId);
-    profile.totalRewards += amount;
-    userProfiles.set(userId, profile);
-
-    updatesUpdater.updateState({
-      type: 'REWARDS_AWARDED',
-      userId,
-      rewardId,
-      amount,
-      reason
-    });
-
-    return { rewardId, reward, amount, reason };
-  };
-
-  // Transfer NFT (placeholder for cross-chain functionality)
-  const transferNFT = async (userId, nftId, targetChain) => {
-    const userNFTsList = userNFTs.get(userId) || [];
-    const nftIndex = userNFTsList.findIndex(n => n.nftId === nftId);
+    state.tierNFTs.get(userTier).push(nft);
     
-    if (nftIndex === -1) {
-      throw new Error('NFT not found');
-    }
+    state.totalMinted++;
+    state.userTiers.set(userId, userTier);
 
-    updatesUpdater.updateState({
-      type: 'NFT_TRANSFER_INITIATED',
-      userId,
-      nftId,
-      targetChain
-    });
-
-    // TODO: Implement actual cross-chain transfer logic
-    console.log(`Transferring NFT ${nftId} to ${targetChain} for user ${userId}`);
-    
-    return { success: true, nftId, targetChain };
-  };
-
-  // Get user profile
-  const getUserProfile = (userId) => {
-    return userProfiles.get(userId) || createUserProfile(userId);
-  };
-
-  // Get user NFTs
-  const getUserNFTs = (userId) => {
-    return userNFTs.get(userId) || [];
-  };
-
-  // Get user collateral
-  const getUserCollateral = (userId) => {
-    return userCollateral.get(userId) || [];
-  };
-
-  // Get user rewards
-  const getUserRewards = (userId) => {
-    return userRewards.get(userId) || [];
-  };
-
-  // Update user tier based on activity
-  const updateUserTier = (userId) => {
-    const profile = userProfiles.get(userId);
-    if (!profile) return null;
-
-    let newTier = 'BRONZE';
-    if (profile.totalSpent >= 10000) newTier = 'PLATINUM';
-    else if (profile.totalSpent >= 5000) newTier = 'GOLD';
-    else if (profile.totalSpent >= 1000) newTier = 'SILVER';
-
-    profile.tier = newTier;
-    userProfiles.set(userId, profile);
-
-    updatesUpdater.updateState({
-      type: 'TIER_UPDATED',
-      userId,
-      newTier
-    });
-
-    return newTier;
-  };
-
-  // Liquidate collateral (for default scenarios)
-  const liquidateCollateral = (userId) => {
-    const userCollaterals = userCollateral.get(userId) || [];
-    const totalCollateral = userCollaterals.reduce((sum, c) => sum + c.amount, 0);
-    
-    if (totalCollateral > 0) {
-      userCollateral.set(userId, []);
+    // Calculate and mint rewards
+    const rewardAmount = calculateReward(shoppingData.amount || 0, userTier);
+    if (rewardAmount > 0) {
+      const rewardPayment = await rewardIssuerKit.mint.mintPayment(
+        AmountMath.make(rewardIssuerKit.brand, BigInt(rewardAmount))
+      );
       
-      updatesUpdater.updateState({
-        type: 'COLLATERAL_LIQUIDATED',
-        userId,
-        totalCollateral
-      });
+      return {
+        nftId,
+        nft: nftPayment,
+        metadata: nftMetadata,
+        rewardAmount,
+        rewardPayment,
+        tier: userTier
+      };
     }
 
-    return totalCollateral;
+    return {
+      nftId,
+      nft: nftPayment,
+      metadata: nftMetadata,
+      tier: userTier
+    };
   };
 
-  // Create Zoe invitations
-  const mintNFTInvitation = zcf.makeInvitation(
-    (seat) => {
-      const { userId, metadata } = seat.getCurrentAllocation();
-      return mintNFT(userId, metadata);
-    },
-    'Mint NFT'
-  );
+  const transferNFT = async (fromUserId, toUserId, nftId) => {
+    assert(!state.paused, 'Contract is paused');
+    assert(fromUserId && toUserId, 'Both user IDs are required');
+    assert(nftId, 'NFT ID is required');
 
-  const lockCollateralInvitation = zcf.makeInvitation(
-    (seat) => {
-      const { userId, amount } = seat.getCurrentAllocation();
-      return lockCollateral(userId, amount);
-    },
-    'Lock Collateral'
-  );
+    const userNFTs = state.userNFTs.get(fromUserId) || [];
+    const nftIndex = userNFTs.findIndex(nft => nft.nftId === nftId);
+    assert(nftIndex !== -1, 'NFT not found');
 
-  const awardRewardsInvitation = zcf.makeInvitation(
-    (seat) => {
-      const { userId, amount, reason } = seat.getCurrentAllocation();
-      return awardRewards(userId, amount, reason);
-    },
-    'Award Rewards'
-  );
+    const nft = userNFTs[nftIndex];
+    
+    // Remove from sender
+    userNFTs.splice(nftIndex, 1);
+    
+    // Add to receiver
+    if (!state.userNFTs.has(toUserId)) {
+      state.userNFTs.set(toUserId, []);
+    }
+    state.userNFTs.get(toUserId).push(nft);
 
-  // Public API
-  const publicAPI = Far('BLOCKPOINTS API', {
+    return { success: true, nft };
+  };
+
+  const crossChainTransfer = async (userId, nftId, targetChain, recipientAddress) => {
+    assert(!state.paused, 'Contract is paused');
+    assert(userId && nftId && targetChain, 'Missing required parameters');
+
+    const userNFTs = state.userNFTs.get(userId) || [];
+    const nft = userNFTs.find(nft => nft.nftId === nftId);
+    assert(nft, 'NFT not found');
+
+    // Create transfer record
+    const transferId = `transfer_${Date.now()}_${Math.random().toString(36).substring(2)}`;
+    const transfer = {
+      transferId,
+      userId,
+      nftId,
+      targetChain,
+      recipientAddress,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+      nft
+    };
+
+    // In a real implementation, this would trigger cross-chain bridge
+    // For now, we'll simulate the transfer
+    setTimeout(() => {
+      transfer.status = 'completed';
+      console.log(`Cross-chain transfer ${transferId} completed`);
+    }, 5000);
+
+    return transfer;
+  };
+
+  const updateUserSpending = async (userId, amount) => {
+    assert(!state.paused, 'Contract is paused');
+    assert(userId && amount > 0, 'Valid user ID and amount required');
+
+    const currentSpending = state.userSpending.get(userId) || 0;
+    const newSpending = currentSpending + amount;
+    state.userSpending.set(userId, newSpending);
+
+    // Check for tier upgrade
+    const newTier = getUserTier(userId);
+    const currentTier = state.userTiers.get(userId) || 'BRONZE';
+    
+    if (newTier !== currentTier) {
+      state.userTiers.set(userId, newTier);
+      return { 
+        tierUpgraded: true, 
+        oldTier: currentTier, 
+        newTier,
+        totalSpent: newSpending
+      };
+    }
+
+    return { 
+      tierUpgraded: false, 
+      currentTier: newTier,
+      totalSpent: newSpending
+    };
+  };
+
+  const getUserProfile = (userId) => {
+    const nfts = state.userNFTs.get(userId) || [];
+    const tier = state.userTiers.get(userId) || 'BRONZE';
+    const totalSpent = state.userSpending.get(userId) || 0;
+    const totalRewards = nfts.reduce((sum, nft) => sum + (nft.shoppingData?.rewardAmount || 0), 0);
+
+    return {
+      userId,
+      tier,
+      totalSpent,
+      totalRewards,
+      nftCount: nfts.length,
+      nfts,
+      joinDate: nfts.length > 0 ? nfts[0].mintDate : new Date().toISOString()
+    };
+  };
+
+  const getPlatformStats = () => {
+    return {
+      totalUsers: state.userNFTs.size,
+      totalNFTs: state.totalMinted,
+      totalSpending: Array.from(state.userSpending.values()).reduce((sum, spent) => sum + spent, 0),
+      tierDistribution: Object.fromEntries(
+        Object.keys(TIER_DEFINITIONS).map(tier => [
+          tier, 
+          (state.tierNFTs.get(tier) || []).length
+        ])
+      ),
+      mintingFees: state.mintingFees,
+      paused: state.paused
+    };
+  };
+
+  // Admin functions
+  const pauseContract = (adminWallet) => {
+    assert(state.adminAddresses.includes(adminWallet), 'Admin access required');
+    state.paused = true;
+    return { success: true, paused: true };
+  };
+
+  const unpauseContract = (adminWallet) => {
+    assert(state.adminAddresses.includes(adminWallet), 'Admin access required');
+    state.paused = false;
+    return { success: true, paused: false };
+  };
+
+  const addAdmin = (adminWallet, newAdmin) => {
+    assert(state.adminAddresses.includes(adminWallet), 'Admin access required');
+    state.adminAddresses.push(newAdmin);
+    return { success: true, admins: state.adminAddresses };
+  };
+
+  const updateFeeRate = (adminWallet, newFeeRate) => {
+    assert(state.adminAddresses.includes(adminWallet), 'Admin access required');
+    assert(newFeeRate >= 0 && newFeeRate <= 0.1, 'Fee rate must be between 0% and 10%');
+    state.feeRate = newFeeRate;
+    return { success: true, feeRate: newFeeRate };
+  };
+
+  const collectFees = (adminWallet) => {
+    assert(state.adminAddresses.includes(adminWallet), 'Admin access required');
+    const fees = state.mintingFees;
+    state.mintingFees = AmountMath.make(nftIssuerKit.brand, 0n);
+    return { success: true, fees };
+  };
+
+  // Return public interface
+  return {
+    // User functions
     mintNFT,
-    lockCollateral,
-    unlockCollateral,
-    awardRewards,
     transferNFT,
+    crossChainTransfer,
+    updateUserSpending,
     getUserProfile,
-    getUserNFTs,
-    getUserCollateral,
-    getUserRewards,
-    updateUserTier,
-    liquidateCollateral,
-    getUpdatesNotifier: () => updatesNotifier,
-    getIssuers: () => ({ nftIssuer, collateralIssuer, rewardIssuer }),
-    getBrands: () => ({ nftBrand, collateralBrand, rewardBrand })
+    
+    // Query functions
+    getPlatformStats,
+    getUserTier,
+    canMintNFT,
+    
+    // Admin functions
+    pauseContract,
+    unpauseContract,
+    addAdmin,
+    updateFeeRate,
+    collectFees,
+    
+    // State access (for testing)
+    getState: () => ({ ...state }),
+    
+    // Issuer access
+    getNFTIssuer: () => nftIssuerKit.issuer,
+    getRewardIssuer: () => rewardIssuerKit.issuer
+  };
+};
+
+// Contract installation
+const start = async (zcf) => {
+  const { nftIssuerKit, rewardIssuerKit, adminWallet, feeCollector } = zcf.getTerms();
+
+  const contract = makeBlockpointsNFTContract(zcf, {
+    nftIssuerKit,
+    rewardIssuerKit,
+    adminWallet,
+    feeCollector
   });
 
+  // Return public API
   return {
-    publicAPI,
-    nftIssuer,
-    collateralIssuer,
-    rewardIssuer,
-    nftBrand,
-    collateralBrand,
-    rewardBrand,
-    invitations: {
-      mintNFT: mintNFTInvitation,
-      lockCollateral: lockCollateralInvitation,
-      awardRewards: awardRewardsInvitation
+    publicAPI: {
+      mintNFT: contract.mintNFT,
+      transferNFT: contract.transferNFT,
+      crossChainTransfer: contract.crossChainTransfer,
+      updateUserSpending: contract.updateUserSpending,
+      getUserProfile: contract.getUserProfile,
+      getPlatformStats: contract.getPlatformStats,
+      getUserTier: contract.getUserTier,
+      canMintNFT: contract.canMintNFT,
+      pauseContract: contract.pauseContract,
+      unpauseContract: contract.unpauseContract,
+      addAdmin: contract.addAdmin,
+      updateFeeRate: contract.updateFeeRate,
+      collectFees: contract.collectFees
     }
   };
-}; 
+};
+
+export { start }; 

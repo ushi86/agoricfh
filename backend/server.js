@@ -949,6 +949,57 @@ const calculateAchievements = (userId, gamification) => {
   return achievements;
 };
 
+// ==================== USER LIST ENDPOINT (ADMIN) ====================
+
+app.get('/api/users', async (req, res) => {
+  try {
+    if (!contractAPI) {
+      return res.status(503).json({ error: 'Blockchain not connected' });
+    }
+
+    // Get all userIds from analyticsData
+    const userIds = Array.from(analyticsData.keys());
+    const users = [];
+
+    for (const userId of userIds) {
+      // Get profile from contract
+      let profile;
+      try {
+        profile = await E(contractAPI).getUserProfile(userId);
+      } catch (e) {
+        profile = { userId, error: 'Profile not found' };
+      }
+      // Add social and gamification
+      const socialProfile = socialData.get(userId) || {
+        followers: [],
+        following: [],
+        achievements: [],
+        referralCode: `REF_${userId}`,
+        referredUsers: []
+      };
+      const gamificationProfile = gamificationData.get(userId) || {
+        level: 1,
+        experience: 0,
+        achievements: [],
+        badges: [],
+        streak: 0,
+        lastActivity: new Date().toISOString()
+      };
+      users.push({
+        userId,
+        profile,
+        social: socialProfile,
+        gamification: gamificationProfile
+      });
+    }
+
+    res.json({ success: true, users });
+  } catch (error) {
+    console.error('Error fetching all users:', error);
+    res.status(500).json({ error: 'Failed to fetch users' });
+  }
+});
+
 // ==================== ERROR HANDLING ====================
 
 app.use((error, req, res, next) => {
