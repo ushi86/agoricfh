@@ -1,0 +1,61 @@
+{
+  "name": "blockpoints-agoric",
+  "version": "1.0.0",
+  "description": "BLOCKPOINTS - NFT rewards platform built on Agoric blockchain",
+  "main": "index.js",
+  "scripts": {
+    "start": "agoric start --reset",
+    "deploy": "agoric deploy contracts/",
+    "test": "agoric test",
+    "build": "agoric build",
+    "dev": "agoric start --reset --dev",
+    "install-deps": "agoric install --agoric-only",
+    "setup": "agoric setup"
+  },
+  "dependencies": {
+    "@agoric/agoric-cli": "^0.0.0",
+    "@agoric/ertp": "^0.0.0",
+    "@agoric/zoe": "^0.0.0",
+    "@agoric/notifier": "^0.0.0",
+    "@agoric/network": "^0.0.0",
+    "@agoric/import-manager": "^0.0.0",
+    "@agoric/install-ses": "^0.0.0",
+    "@agoric/marshal": "^0.0.0",
+    "@agoric/patterns": "^0.0.0",
+    "@agoric/pegasus": "^0.0.0",
+    "@agoric/price-feed": "^0.0.0",
+    "@agoric/price-authority": "^0.0.0",
+    "@agoric/store": "^0.0.0",
+    "@agoric/swing-store": "^0.0.0",
+    "@agoric/telemetry": "^0.0.0",
+    "@agoric/vats": "^0.0.0",
+    "@agoric/vat-data": "^0.0.0",
+    "@agoric/wallet": "^0.0.0",
+    "@agoric/wallet-backend": "^0.0.0",
+    "@agoric/wallet-connection": "^0.0.0",
+    "@agoric/wallet-ui": "^0.0.0",
+    "@endo/eventual-send": "^0.0.0",
+    "@endo/far": "^0.0.0",
+    "@endo/patterns": "^0.0.0",
+    "@endo/promise-kit": "^0.0.0",
+    "@endo/stream": "^0.0.0",
+    "@endo/time": "^0.0.0",
+    "@endo/zone": "^0.0.0"
+  },
+  "devDependencies": {
+    "@agoric/eslint-config": "^0.0.0",
+    "@agoric/prettier-config": "^0.0.0",
+    "eslint": "^8.0.0",
+    "prettier": "^2.8.0"
+  },
+  "keywords": [
+    "agoric",
+    "blockchain",
+    "nft",
+    "defi",
+    "smart-contracts",
+    "loyalty-rewards"
+  ],
+  "author": "BLOCKPOINTS Team",
+  "license": "MIT"
+} 
