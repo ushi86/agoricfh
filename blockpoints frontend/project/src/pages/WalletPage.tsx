@@ -7,7 +7,7 @@ const WalletPage = () => {
 
   if (!isConnected) {
     return (
-      <div className="w-full max-w-7xl mx-auto px-4 sm:px-8 lg:px-12 py-24 flex flex-col items-center justify-center text-center">
+      <div className="w-full max-w-screen-xl mx-auto px-2 sm:px-4 md:px-8 py-8 md:py-12 flex flex-col items-center justify-center text-center">
         <h2 className="font-sans text-3xl font-bold mb-6">Connect Your Wallet</h2>
         <p className="text-white/70 mb-8 text-lg">Connect your wallet to view and manage your assets.</p>
         <button
@@ -21,7 +21,7 @@ const WalletPage = () => {
   }
 
   return (
-    <div className="w-full max-w-7xl mx-auto px-4 sm:px-8 lg:px-12 py-12 md:py-20">
+    <div className="w-full max-w-screen-xl mx-auto px-2 sm:px-4 md:px-8 py-8 md:py-12">
       <WalletIntegration />
     </div>
   );
