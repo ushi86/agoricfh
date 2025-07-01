@@ -16,14 +16,7 @@
     "cors": "^2.8.5",
     "helmet": "^7.1.0",
     "express-rate-limit": "^7.1.5",
-    "dotenv": "^16.3.1",
-    "@agoric/cosmic-proto": "^0.0.0",
-    "@agoric/wallet-connection": "^0.0.0",
-    "@agoric/zoe": "^0.0.0",
-    "@agoric/ertp": "^0.0.0",
-    "@agoric/notifier": "^0.0.0",
-    "@endo/eventual-send": "^0.0.0",
-    "@endo/far": "^0.0.0"
+    "dotenv": "^16.3.1"
   },
   "devDependencies": {
     "nodemon": "^3.0.2",
